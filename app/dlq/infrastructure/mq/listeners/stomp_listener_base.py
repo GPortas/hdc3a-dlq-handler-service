@@ -3,15 +3,21 @@ This module defines a StompListenerBase, which is an abstract class intended
 to define common behavior for stomp-implemented MQ listener components.
 """
 import json
+import logging
 from abc import abstractmethod, ABC
 
 import stomp
 from stomp.utils import Frame
+from tenacity import retry, wait_exponential, stop_after_attempt, before_log
 
 from app.common.infrastructure.mq.stomp_interactor import StompInteractor
 
 
 class StompListenerBase(stomp.ConnectionListener, StompInteractor, ABC):
+    __STOMP_CONN_MIN_RETRY_WAITING_SECONDS = 2
+    __STOMP_CONN_MAX_RETRY_WAITING_SECONDS = 10
+    __STOMP_CONN_MAX_ATTEMPTS = 36
+
     __ACK_CLIENT_INDIVIDUAL = "client-individual"
 
     def __init__(self) -> None:
@@ -64,6 +70,15 @@ class StompListenerBase(stomp.ConnectionListener, StompInteractor, ABC):
         :type message_subscription: str
         """
 
+    @retry(
+        wait=wait_exponential(
+            multiplier=1,
+            min=__STOMP_CONN_MIN_RETRY_WAITING_SECONDS,
+            max=__STOMP_CONN_MAX_RETRY_WAITING_SECONDS
+        ),
+        stop=stop_after_attempt(__STOMP_CONN_MAX_ATTEMPTS),
+        before=before_log(logging.getLogger(), logging.INFO)
+    )
     def __create_subscribed_mq_connection(self) -> stomp.Connection:
         connection = self._create_mq_connection()
         connection.subscribe(destination=self._get_queue_name(), id=1, ack=self.__ACK_CLIENT_INDIVIDUAL)

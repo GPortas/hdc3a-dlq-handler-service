@@ -3,17 +3,28 @@ This module defines a StompPublisherBase, which is an abstract class intended
 to define common behavior for stomp-implemented MQ publisher components.
 """
 import json
+import logging
 import os
 import time
 from abc import ABC
 
+from tenacity import retry, stop_after_attempt, retry_if_exception_type, before_log
+
+from app.common.domain.mq.exceptions.mq_exception import MqException
 from app.common.infrastructure.mq.stomp_interactor import StompInteractor
 from app.dlq.domain.mq.exceptions.mq_message_publish_exception import MqMessagePublishException
 
 
 class StompPublisherBase(StompInteractor, ABC):
+    __STOMP_PUBLISH_MAX_RETRIES = 2
     __DEFAULT_MESSAGE_EXPIRATION_MS = 3600000
 
+    @retry(
+        stop=stop_after_attempt(__STOMP_PUBLISH_MAX_RETRIES),
+        retry=retry_if_exception_type(MqException),
+        reraise=True,
+        before=before_log(logging.getLogger(), logging.INFO)
+    )
     def _publish_message(self, message: dict, queue_name: str) -> None:
         """
         Publishes a message to the queue.
